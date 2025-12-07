@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+apps/*/node_modules/
+packages/*/node_modules/
+.pnp
+.pnp.js
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+apps/api/venv/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+apps/api/local.db
+
+# Testing
+coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Next.js
+.next
+out
+build
+dist
+
+# Misc
+.DS_Store
+*.pem
+*.log
+
+# Local env files
+.env
+.env.local
+.env.*.local
+!.env.example
+!apps/*/.env.example
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
