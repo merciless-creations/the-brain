@@ -4,25 +4,47 @@
 
 ### Setup & Infrastructure
 - [x] **Issue #1**: Initialize Next.js Frontend
-- [x] **Issue #2**: Initialize FastAPI Backend
-- [x] **Issue #3**: PostgreSQL Database Setup
-- [ ] **Issue #4**: Object Storage (MinIO/S3)
-- [ ] **Issue #5**: Authentication (JWT)
-- [ ] **Issue #22**: AI Gateway Service
-- [ ] **Issue #23**: Background Worker Queue
-- [ ] **Issue #24**: Redis Cache Setup
-- [ ] **Issue #25**: WebSocket Infrastructure
+- [ ] **Issue #2**: AWS CDK Infrastructure Setup
+  - Create `infra/` directory with CDK TypeScript project
+  - Define API Gateway REST API
+  - Define Lambda functions for API handlers
+  - Configure LocalStack for local development
+- [ ] **Issue #3**: Aurora Serverless v2 Setup
+  - PostgreSQL-compatible database
+  - VPC configuration
+  - Security groups
+- [ ] **Issue #4**: S3 Storage
+  - Bucket for file uploads
+  - CORS configuration
+- [ ] **Issue #5**: Authentication (Lambda Authorizer + JWT)
+- [ ] **Issue #22**: AI Gateway Lambda
+  - Lambda function for AI operations
+  - Integration with OpenAI/Anthropic
+- [ ] **Issue #23**: Background Jobs (SQS + Fargate)
+  - SQS queue for long-running AI tasks
+  - Fargate task definitions
+- [ ] **Issue #24**: ElastiCache Redis Setup
+  - For caching and Y.js state
+- [ ] **Issue #25**: Y.js Collaboration Service
+  - Fargate service for Y.js WebSocket server
+  - Application Load Balancer
 - [ ] **Issue #26**: Database Schema Implementation
+  - SQLAlchemy models
+  - Alembic migrations
 
-**Milestone**: Basic monorepo with all services running locally
+**Milestone**: AWS serverless infrastructure running on LocalStack locally
 
 **Deliverables**:
 - Frontend dev server running on port 3000
-- Backend API server running on port 8000
-- PostgreSQL database with initial schema
-- Redis cache operational
-- Authentication flow working
+- LocalStack running with all AWS services emulated
+- API Gateway endpoints accessible via LocalStack
+- Lambda functions deployed and invocable
+- PostgreSQL database with initial schema (local container)
+- ElastiCache Redis operational (local container)
+- S3 bucket created for uploads
+- Authentication flow working (Lambda Authorizer)
 - Basic health check endpoints
+- AWS CDK stacks deployable to LocalStack and AWS
 
 ---
 
@@ -90,15 +112,19 @@
 ## Phase 4: Collaboration (Weeks 10-11)
 
 ### Multi-User Features
-- [ ] **Issue #16**: Real-time Collaboration (Y.js/CRDTs)
+- [ ] **Issue #16**: Real-time Collaboration (Y.js on Fargate)
+  - Deploy Y.js WebSocket server to Fargate
+  - Configure ALB for WebSocket connections
+  - Integrate ElastiCache Redis for Y.js state persistence
 - [ ] **Issue #15**: Cross-Chapter Consistency Assistant
 
 **Milestone**: Multiple authors can work simultaneously
 
 **Deliverables**:
-- Real-time text synchronization
+- Real-time text synchronization via Y.js
 - Presence indicators and cursors
-- Conflict-free concurrent editing
+- Conflict-free concurrent editing (CRDTs)
+- Y.js state persisted to ElastiCache Redis
 - Consistency checking across chapters
 - Term tracking and contradiction detection
 
@@ -173,16 +199,27 @@
 
 ### Development Team
 - **1 Frontend Developer**: Next.js, TipTap, Y.js
-- **1 Backend Developer**: FastAPI, SQLAlchemy, Celery
+- **1 Backend Developer**: Python Lambda, SQLAlchemy, AWS CDK
 - **1 Full-Stack Developer**: Cross-functional tasks
 - **AI/ML Specialist**: Part-time for AI integration
 
-### Infrastructure (Initial)
-- **Compute**: 2-4 GB RAM, 2 vCPU (API server)
-- **Database**: PostgreSQL (10 GB storage initially)
-- **Cache**: Redis (1 GB)
-- **Storage**: S3-compatible (50 GB initially)
+### Infrastructure (AWS Serverless - Pay-per-use)
+
+#### Local Development
+- **LocalStack**: Emulates AWS services locally
+- **Docker**: 4 GB RAM minimum for LocalStack + services
+- **PostgreSQL**: Local container for development
+
+#### Production (Initial - Cost-Optimized)
+- **Lambda**: Pay-per-invocation (~$0.20 per million requests)
+- **API Gateway**: Pay-per-request (~$3.50 per million)
+- **Aurora Serverless v2**: Pay-per-ACU (~$0.12/hour when active, scales to 0)
+- **ElastiCache Redis**: t3.micro (~$12/month)
+- **Fargate (Y.js)**: 0.25 vCPU, 0.5 GB (~$10/month always-on)
+- **S3**: Pay-per-storage (~$0.023/GB)
 - **AI Credits**: $500/month for testing
+
+**Estimated Monthly Cost (MVP)**: $50-150/month at low usage
 
 ---
 
@@ -240,11 +277,12 @@
 - API for third-party integrations
 
 ### Infrastructure Improvements
-- Kubernetes deployment
-- Multi-region support
-- CDN for static assets
-- Advanced monitoring (Datadog, New Relic)
-- Automated backups and disaster recovery
+- Multi-region deployment (replicate CDK stacks)
+- CloudFront CDN for static assets
+- Advanced monitoring (CloudWatch dashboards, X-Ray tracing)
+- Automated backups (Aurora snapshots, S3 versioning)
+- Disaster recovery (cross-region replication)
+- Reserved capacity for cost savings at scale
 
 ---
 
@@ -276,5 +314,5 @@
 ---
 
 **Last Updated**: 2025-12-07
-**Version**: 1.0
+**Version**: 2.0 (AWS Serverless Architecture)
 **Maintained By**: The Brain Development Team

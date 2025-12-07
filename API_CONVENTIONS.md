@@ -5,8 +5,20 @@
 1. **RESTful Design**: Use standard HTTP methods and status codes
 2. **Versioning**: All endpoints under `/api/v1/`
 3. **Consistency**: Uniform patterns across all endpoints
-4. **Documentation**: OpenAPI/Swagger auto-generated
+4. **Documentation**: OpenAPI/Swagger auto-generated via CDK
 5. **Error Handling**: Structured error responses
+6. **Serverless**: All endpoints served via AWS API Gateway + Lambda
+
+## Architecture Overview
+
+```
+Client → API Gateway (REST) → Lambda → Aurora/S3/SQS
+Client → ALB (WebSocket) → Fargate (Y.js) → ElastiCache Redis
+```
+
+- **REST API**: AWS API Gateway with Lambda integration
+- **WebSocket**: Application Load Balancer → Fargate (for Y.js)
+- **Background Jobs**: SQS → Fargate tasks
 
 ## URL Structure
 
@@ -270,38 +282,81 @@ POST /api/v1/ai/summarize
 }
 ```
 
-## WebSocket Endpoints
+## WebSocket Endpoints (Y.js Collaboration)
+
+WebSocket connections for real-time collaboration are handled by Fargate (Y.js server) behind an Application Load Balancer, not API Gateway.
 
 ### Connection
 ```
-ws://localhost:8000/ws/collaboration/{project_id}
-?token={jwt_token}
+# LocalStack
+ws://localhost:4510/collaboration/{project_id}?token={jwt_token}
+
+# Production
+wss://collab.thebrain.io/collaboration/{project_id}?token={jwt_token}
+```
+
+### Y.js Protocol
+The WebSocket connection uses the Y.js WebSocket protocol for CRDT synchronization:
+
+```
+1. Client connects with JWT token
+2. Server validates token via Lambda authorizer
+3. Y.js sync protocol handles document updates
+4. Updates broadcast to all connected clients
 ```
 
 ### Events (Client → Server)
 ```json
 {
-  "type": "update",
-  "data": {
-    "chapter_id": "uuid",
-    "operations": [...]
-  }
+  "type": "sync-step-1",
+  "data": "[Y.js encoded state vector]"
 }
 ```
 
 ### Events (Server → Client)
 ```json
 {
-  "type": "update",
-  "user": "user_id",
+  "type": "sync-step-2",
+  "data": "[Y.js encoded diff]"
+}
+```
+
+### Presence Events
+```json
+{
+  "type": "awareness",
   "data": {
-    "chapter_id": "uuid",
-    "operations": [...]
+    "user_id": "uuid",
+    "cursor": {"line": 10, "column": 5},
+    "selection": null
   }
 }
 ```
 
+### Infrastructure Notes
+- Y.js server runs on Fargate (always-on, not Lambda)
+- Document state persisted to ElastiCache Redis
+- ALB handles WebSocket sticky sessions
+- Health checks: `/health` endpoint on port 80
+
 ## Rate Limiting
+
+Rate limiting is implemented via AWS API Gateway Usage Plans.
+
+### Configuration (via CDK)
+```typescript
+const usagePlan = api.addUsagePlan('StandardPlan', {
+  name: 'Standard',
+  throttle: {
+    rateLimit: 100,    // requests per second
+    burstLimit: 200,   // burst capacity
+  },
+  quota: {
+    limit: 10000,      // requests per day
+    period: apigateway.Period.DAY,
+  },
+});
+```
 
 ### Headers
 ```
@@ -310,7 +365,7 @@ X-RateLimit-Remaining: 95
 X-RateLimit-Reset: 1638900000
 ```
 
-### Rate Limit Response
+### Rate Limit Response (429)
 ```json
 {
   "error": {
@@ -319,6 +374,15 @@ X-RateLimit-Reset: 1638900000
     "retry_after": 60
   }
 }
+```
+
+### AI Endpoints (Separate Limits)
+AI endpoints have lower rate limits due to cost:
+```typescript
+const aiUsagePlan = api.addUsagePlan('AIPlan', {
+  throttle: { rateLimit: 10, burstLimit: 20 },
+  quota: { limit: 500, period: apigateway.Period.DAY },
+});
 ```
 
 ## File Uploads
@@ -418,6 +482,57 @@ Response:
 - Support both versions for 12 months
 - Document migration guide
 
+## Lambda Response Format
+
+Lambda functions must return responses in API Gateway proxy integration format:
+
+### Success Response
+```python
+def handler(event, context):
+    return {
+        "statusCode": 200,
+        "headers": {
+            "Content-Type": "application/json",
+            "Access-Control-Allow-Origin": "*"
+        },
+        "body": json.dumps({
+            "data": {"id": "uuid", ...},
+            "meta": {"request_id": context.aws_request_id}
+        })
+    }
+```
+
+### Error Response
+```python
+def handler(event, context):
+    return {
+        "statusCode": 400,
+        "headers": {"Content-Type": "application/json"},
+        "body": json.dumps({
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": "Invalid input"
+            }
+        })
+    }
+```
+
+### Event Structure (from API Gateway)
+```python
+event = {
+    "httpMethod": "POST",
+    "path": "/api/v1/projects",
+    "headers": {"Authorization": "Bearer ..."},
+    "queryStringParameters": {"page": "1"},
+    "body": '{"title": "My Book"}',
+    "requestContext": {
+        "authorizer": {
+            "claims": {"sub": "user-id", "email": "user@example.com"}
+        }
+    }
+}
+```
+
 ## Testing
 
 ### Test Every Endpoint
@@ -428,18 +543,60 @@ Response:
 - Validation errors (422)
 - Rate limiting (429)
 
-### Example Test Structure
+### Local Testing (with LocalStack)
+```bash
+# Deploy to LocalStack
+cd infra && cdklocal deploy --all
+
+# Test endpoint
+curl -X POST http://localhost:4566/restapis/<api-id>/local/_user_request_/api/v1/projects \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"title": "Test Project"}'
+```
+
+### Example Test Structure (pytest)
 ```python
+import pytest
+from moto import mock_aws
+from apps.api.handlers.projects import handler
+
+@mock_aws
 def test_create_project_success():
-    response = client.post("/api/v1/projects", json=valid_data)
-    assert response.status_code == 201
-    assert "id" in response.json()["data"]
+    event = {
+        "httpMethod": "POST",
+        "path": "/api/v1/projects",
+        "body": '{"title": "My Book"}',
+        "requestContext": {
+            "authorizer": {"claims": {"sub": "user-123"}}
+        }
+    }
+    response = handler(event, None)
+    assert response["statusCode"] == 201
+    body = json.loads(response["body"])
+    assert "id" in body["data"]
 
 def test_create_project_unauthorized():
-    response = client.post("/api/v1/projects", json=valid_data)
-    assert response.status_code == 401
+    event = {
+        "httpMethod": "POST",
+        "path": "/api/v1/projects",
+        "body": '{"title": "My Book"}',
+        "requestContext": {}  # No authorizer
+    }
+    response = handler(event, None)
+    assert response["statusCode"] == 401
+```
+
+### Integration Testing
+```bash
+# Run integration tests against LocalStack
+pytest tests/integration/ --localstack
+
+# Run against staging
+pytest tests/integration/ --env=staging
 ```
 
 ---
 
 **Last Updated**: 2025-12-07
+**Version**: 2.0 (AWS Serverless)

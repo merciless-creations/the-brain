@@ -148,30 +148,38 @@
 
 **Frontend:**
 
-* React (Next.js recommended)
-* TipTap or Lexical for rich-text editing
-* WebSocket layer for multi-author collaboration (Ot.js or Y.js)
+* React (Next.js 14+ with App Router)
+* TipTap for rich-text editing
+* Y.js for multi-author collaboration (CRDTs)
 
-**Backend:**
+**Backend (AWS Serverless):**
 
-* FastAPI / Node (Express or Nest) for API
-* Background workers (Celery / BullMQ) for long-running requests
-* Authentication (JWT + refresh tokens)
+* AWS API Gateway (REST API + WebSocket API)
+* AWS Lambda (Python 3.11+) for API handlers
+* AWS Fargate for background jobs (long-running AI tasks)
+* Lambda Authorizer for JWT authentication
+* AWS CDK (TypeScript) for infrastructure-as-code
 
 **Database:**
 
-* PostgreSQL for structured data:
+* Aurora Serverless v2 (PostgreSQL-compatible) for structured data:
 
   * Projects
   * Chapters
   * Notes
   * User profiles
   * Versions
-* Object storage (S3-compatible) for research documents, file uploads
+* S3 for research documents, file uploads
+
+**Collaboration Layer:**
+
+* Y.js WebSocket server running on AWS Fargate (always-on)
+* Application Load Balancer for WebSocket connections
+* ElastiCache Redis for Y.js document state
 
 **AI Layer:**
 
-* One service wrapper that supports multiple LLMs.
+* Lambda functions with AI service wrapper supporting multiple LLMs
 * Abstractions:
 
   * `generate_chapter()`
@@ -179,7 +187,14 @@
   * `research_summary()`
   * `rewrite_text(style)`
   * `consistency_check()`
-* Allow model swapping: OpenAI, Anthropic, Gemini, local LLMs.
+* Model swapping: OpenAI, Anthropic, Gemini, local LLMs
+* Long-running AI jobs offloaded to Fargate via SQS
+
+**Local Development:**
+
+* LocalStack for AWS service emulation
+* `cdklocal` for deploying CDK stacks locally
+* Standard PostgreSQL container for database
 
 **Document Model**
 Each book contains:
@@ -205,22 +220,22 @@ Each book contains:
 
 **Collaboration**
 
-* CRDTs via Y.js or Automerge
-* Realtime cursors
+* CRDTs via Y.js on Fargate
+* Realtime cursors via WebSocket (ALB → Fargate)
 * Comment threads tied to text ranges
 
 **Compute**
 
-* Stateless backend servers + horizontal scaling
-* AI calls routed through a job queue when >10s
-* Local caching of recent AI completions (Redis)
+* Serverless Lambda functions (auto-scaling, pay-per-request)
+* AI calls >10s routed to Fargate via SQS
+* ElastiCache Redis for caching AI completions
 
 **Security**
 
-* Rate-limiting per-user
-* Audit logs for admin
+* Rate-limiting via API Gateway usage plans
+* CloudWatch audit logs
 * Minimal personally identifiable data stored
-* Encryption at rest for user-generated research files
+* S3 encryption at rest for user-generated research files
 
 ---
 
@@ -447,11 +462,16 @@ A web-based platform that helps non-fiction authors plan, research, draft, and r
 
 ## **8. Technical Requirements**
 
-* REST + WebSocket hybrid.
+* AWS API Gateway for REST + WebSocket APIs.
+* AWS Lambda for serverless API handlers.
+* AWS Fargate for background jobs and Y.js collaboration.
+* Aurora Serverless v2 (PostgreSQL) for database.
 * AI abstraction layer with model-agnostic API.
-* Redis caching for recent completions.
-* S3-compatible storage for uploads.
-* CRDT-based collaborative editing.
+* ElastiCache Redis for caching and Y.js state.
+* S3 for file uploads.
+* CRDT-based collaborative editing (Y.js on Fargate).
+* AWS CDK for infrastructure-as-code.
+* LocalStack for local development.
 
 ---
 
@@ -508,129 +528,154 @@ No fluff. No narrative. Just clean diagrams.
         │                         │                         │
         ▼                         ▼                         ▼
 ┌──────────────┐        ┌──────────────────┐       ┌──────────────────┐
-│  API Server  │        │ Collaboration Svc│       │  AI Gateway Svc  │
-│ (FastAPI/TS) │        │   (Y.js/CRDT)    │       │ (Model Abstraction)
+│ API Gateway  │        │      ALB         │       │   API Gateway    │
+│  (REST API)  │        │  (WebSocket)     │       │  (AI Endpoints)  │
+└──────┬───────┘        └─────────┬────────┘       └─────────┬────────┘
+       │                          │                          │
+       ▼                          ▼                          ▼
+┌──────────────┐        ┌──────────────────┐       ┌──────────────────┐
+│   Lambda     │        │  Fargate (Y.js)  │       │     Lambda       │
+│  Functions   │        │   (always-on)    │       │  (AI Gateway)    │
 │              │        │                  │       │                  │
 │• Auth        │        │• Sync docs       │       │• Draft generation│
 │• CRUD ops    │        │• Presence        │       │• Rewrites        │
 │• Exports     │        │• Text diffs      │       │• Summaries       │
 └──────┬───────┘        └─────────┬────────┘       └─────────┬────────┘
-       │                           │                          │
-       │                           │                          │
-       ▼                           ▼                          ▼
+       │                          │                          │
+       │                          │                          │
+       ▼                          ▼                          ▼
 ┌──────────────┐        ┌──────────────────┐       ┌──────────────────┐
-│   Postgres   │        │     Redis        │       │     Worker Pool  │
-│ Projects     │        │ Collaboration    │       │  (Background AI  │
-│ Chapters     │        │ Cache            │       │   Jobs > 10s)    │
-│ Notes        │        └──────────────────┘       └──────────────────┘
-└──────┬───────┘                                           │
+│   Aurora     │        │  ElastiCache     │       │   SQS + Fargate  │
+│ Serverless   │        │    Redis         │       │  (Background AI  │
+│ (PostgreSQL) │        │ (Y.js State)     │       │   Jobs > 10s)    │
+└──────┬───────┘        └──────────────────┘       └──────────────────┘
        │                                                   │
        ▼                                                   ▼
 ┌──────────────────┐                             ┌────────────────────┐
-│   Object Store    │                             │ AI Providers (LLMs)│
-│    (S3, etc.)     │<----------------------------▶ OpenAI / Anthropic │
-│ Research PDFs     │                             │ Gemini / Local LLM │
+│       S3          │                             │ AI Providers (LLMs)│
+│ Research PDFs     │<----------------------------│ OpenAI / Anthropic │
+│ File Uploads      │                             │ Gemini / Local LLM │
 └──────────────────┘                             └────────────────────┘
+
+                     ┌────────────────────────┐
+                     │   Infrastructure       │
+                     │   (AWS CDK)            │
+                     │                        │
+                     │  Local: LocalStack     │
+                     │  Prod: AWS Account     │
+                     └────────────────────────┘
 ```
 
 ---
 
-## **4.2 Sequence Diagram — “User Generates a Chapter Draft”**
+## **4.2 Sequence Diagram — "User Generates a Chapter Draft"**
 
 ```
-User         Frontend         API Server         AI Gateway       Model Provider
- |               |                |                   |                 |
- | Click "Draft"|                |                   |                 |
- |-------------->|                |                   |                 |
- |               | POST /draft    |                   |                 |
- |               |--------------->|                   |                 |
- |               |                | Validate input    |                 |
- |               |                |------------------>|                 |
- |               |                |                   |  Build prompt   |
- |               |                |                   |---------------->|
- |               |                |                   |                 |
- |               |                |                   |<----------------|
- |               |                |                   |   AI response   |
- |               |                |   Return draft    |                 |
- |               |<---------------|                   |                 |
- |  Render text  |                |                   |                 |
- |<--------------|                |                   |                 |
-```
-
----
-
-## **4.3 Sequence Diagram — “User & Co-Author Edit Simultaneously”**
-
-```
-Author A        Frontend A      Collab Svc      Redis Cache      Frontend B     Author B
-    |               |               |               |               |             |
-    | Type text     |               |               |               |             |
-    |-------------->|               |               |               |             |
-    |               | CRDT update   |               |               |             |
-    |               |-------------->|               |               |             |
-    |               |               | Store update  |               |             |
-    |               |               |-------------->|               |             |
-    |               |               |               | Push update   |             |
-    |               |               |<--------------|               |             |
-    |               | Broadcast change              |               |             |
-    |               |---------------------------------------------->|             |
-    |               |                                              | Render diff |
-    |               |<----------------------------------------------|------------|
+User         Frontend       API Gateway       Lambda          AI Gateway Lambda    Model Provider
+ |               |                |               |                   |                 |
+ | Click "Draft"|                |               |                   |                 |
+ |-------------->|                |               |                   |                 |
+ |               | POST /draft    |               |                   |                 |
+ |               |--------------->|               |                   |                 |
+ |               |                | Invoke Lambda |                   |                 |
+ |               |                |-------------->|                   |                 |
+ |               |                |               | Validate + call   |                 |
+ |               |                |               |------------------>|                 |
+ |               |                |               |                   |  Build prompt   |
+ |               |                |               |                   |---------------->|
+ |               |                |               |                   |<----------------|
+ |               |                |               |                   |   AI response   |
+ |               |                |               |   Return draft    |                 |
+ |               |<---------------|---------------|                   |                 |
+ |  Render text  |                |               |                   |                 |
+ |<--------------|                |               |                   |                 |
 ```
 
 ---
 
-## **4.4 Sequence Diagram — “AI Summarizes Uploaded Research PDF”**
+## **4.3 Sequence Diagram — "User & Co-Author Edit Simultaneously"**
 
 ```
-User        Frontend        API Server    Object Storage     Worker Pool       AI Provider
- |             |               |               |                 |                 |
- | Upload PDF  |               |               |                 |                 |
- |------------>|               |               |                 |                 |
- |             | PUT /upload   |               |                 |                 |
- |             |-------------->|               |                 |                 |
- |             |               | Upload file   |                 |                 |
- |             |               |-------------->|                 |                 |
- |             |               |               | Return URL      |                 |
- |             |<- - - - - - - |               |                 |                 |
- | Request summary             |               |                 |                 |
- |------------>|               |               |                 |                 |
- |             | POST /summ    |               |                 |                 |
- |             |-------------->| Queue job     |                 |                 |
- |             |               |-------------->|                 |                 |
- | Show spinner |              |               |                 |                 |
- |             |               |               | Worker fetch PDF|                 |
- |             |               |               |---------------->| Process PDF     |
- |             |               |               |                 |---------------->|
- |             |               |               |                 |   AI response   |
- |             |               |               |                 |<----------------|
- | Poll status |               | Return summary|                 |                 |
- |<------------|               |<--------------|                 |                 |
- | Display     |               |               |                 |                 |
+Author A        Frontend A       ALB        Fargate (Y.js)   ElastiCache     Frontend B     Author B
+    |               |             |               |               |               |             |
+    | Type text     |             |               |               |               |             |
+    |-------------->|             |               |               |               |             |
+    |               | WSS connect |               |               |               |             |
+    |               |------------>|               |               |               |             |
+    |               |             | Route to task |               |               |             |
+    |               |             |-------------->|               |               |             |
+    |               | CRDT update |               |               |               |             |
+    |               |-------------------------->  |               |               |             |
+    |               |             |               | Store update  |               |             |
+    |               |             |               |-------------->|               |             |
+    |               |             |               |               | Push update   |             |
+    |               |             |               |<--------------|               |             |
+    |               | Broadcast change            |               |               |             |
+    |               |------------------------------------------------------------>|             |
+    |               |                                                            | Render diff |
+    |               |<------------------------------------------------------------|------------|
 ```
 
 ---
 
-## **4.5 Data Flow Diagram — “Writing Session”**
+## **4.4 Sequence Diagram — "AI Summarizes Uploaded Research PDF"**
 
 ```
-+---------------+          +----------------+          +----------------+
-|   User Input  |  ----->  |   Frontend     |  ----->  |   API Server   |
-+---------------+          +----------------+          +----------------+
+User        Frontend      API Gateway      Lambda           S3            SQS         Fargate        AI Provider
+ |             |               |               |             |              |             |                 |
+ | Upload PDF  |               |               |             |              |             |                 |
+ |------------>|               |               |             |              |             |                 |
+ |             | PUT /upload   |               |             |              |             |                 |
+ |             |-------------->|               |             |              |             |                 |
+ |             |               | Invoke Lambda |             |              |             |                 |
+ |             |               |-------------->|             |              |             |                 |
+ |             |               |               | Upload file |              |             |                 |
+ |             |               |               |------------>|              |             |                 |
+ |             |               |               |             | Return URL   |             |                 |
+ |             |<- - - - - - - |- - - - - - - -|             |              |             |                 |
+ | Request summary             |               |             |              |             |                 |
+ |------------>|               |               |             |              |             |                 |
+ |             | POST /summ    |               |             |              |             |                 |
+ |             |-------------->|               |             |              |             |                 |
+ |             |               | Invoke Lambda |             |              |             |                 |
+ |             |               |-------------->| Queue job   |              |             |                 |
+ |             |               |               |-------------------------->|             |                 |
+ | Show spinner |              |               |             |              | Trigger task|                 |
+ |             |               |               |             |              |------------>|                 |
+ |             |               |               |             | Fetch PDF    |             |                 |
+ |             |               |               |             |<-------------|             |                 |
+ |             |               |               |             |              |             | Process PDF     |
+ |             |               |               |             |              |             |---------------->|
+ |             |               |               |             |              |             |   AI response   |
+ |             |               |               |             |              |             |<----------------|
+ | Poll status |               | Return summary|             |              |             |                 |
+ |<------------|               |<--------------|             |              |             |                 |
+ | Display     |               |               |             |              |             |                 |
+```
+
+---
+
+## **4.5 Data Flow Diagram — "Writing Session"**
+
+```
++---------------+          +----------------+          +------------------+
+|   User Input  |  ----->  |   Frontend     |  ----->  |   API Gateway    |
++---------------+          +----------------+          +------------------+
                                  |                             |
                                  v                             v
-                          +-------------+              +----------------+
-                          |  Local CRDT | <--------->  | Collab Service |
-                          +-------------+              +----------------+
+                          +-------------+              +------------------+
+                          |  Local CRDT | <--------->  |  Fargate (Y.js)  |
+                          +-------------+              +------------------+
                                  |                             |
                                  v                             v
-                          +-------------+              +----------------+
-                          | Redis Cache | <---------→  |   Postgres    |
-                          +-------------+              +----------------+
+                          +-------------+              +------------------+
+                          | ElastiCache | <---------→  | Aurora Serverless|
+                          +-------------+              +------------------+
                                  |
                                  v
                            +----------+
-                           | LLM Calls|
+                           |  Lambda  |
+                           | AI Calls |
                            +----------+
                                  |
                                  v
@@ -648,30 +693,30 @@ User        Frontend        API Server    Object Storage     Worker Pool       A
                 │   Frontend   │
                 └──────┬───────┘
                        │
-                       ▼
-          ┌──────────────────────────┐
-          │        API Layer         │
-          │  Auth / CRUD / Export    │
-          └──────┬───────────────────┘
-                 │
-   ┌─────────────┴───────────────┐
-   │                             │
-   ▼                             ▼
-┌─────────────┐          ┌────────────────┐
-│ AI Gateway  │          │ Collaboration  │
-│ Drafting    │          │ Y.js / CRDT    │
-│ Summaries   │          └────────────────┘
-└──────┬──────┘                 │
-       │                        │
-       ▼                        ▼
-┌─────────────┐         ┌────────────────┐
-│ Worker Pool │         │ Redis / Cache  │
-└──────┬──────┘         └────────────────┘
-       │
-       ▼
-┌─────────────┐
-│ AI Provider │
-└─────────────┘
+         ┌─────────────┼─────────────┐
+         │             │             │
+         ▼             ▼             ▼
+┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+│ API Gateway │ │     ALB     │ │ API Gateway │
+│   (REST)    │ │    (WSS)    │ │    (AI)     │
+└──────┬──────┘ └──────┬──────┘ └──────┬──────┘
+       │               │               │
+       ▼               ▼               ▼
+┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+│   Lambda    │ │   Fargate   │ │   Lambda    │
+│ CRUD/Auth   │ │  Y.js/CRDT  │ │ AI Gateway  │
+└──────┬──────┘ └──────┬──────┘ └──────┬──────┘
+       │               │               │
+       ▼               ▼               ▼
+┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+│   Aurora    │ │ ElastiCache │ │ SQS+Fargate │
+│ Serverless  │ │   Redis     │ │ (Long Jobs) │
+└─────────────┘ └─────────────┘ └──────┬──────┘
+                                       │
+                                       ▼
+                               ┌─────────────┐
+                               │ AI Provider │
+                               └─────────────┘
 ```
 
 

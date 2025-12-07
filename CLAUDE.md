@@ -45,14 +45,21 @@
 - **Models**: OpenAI, Anthropic, Gemini (pluggable)
 - **Prompts**: Template-based with versioning
 
+### Collaboration Layer
+- **Real-time Sync**: Y.js (CRDTs) running on Fargate
+- **WebSocket**: Application Load Balancer → Fargate (always-on)
+- **State Storage**: ElastiCache Redis for Y.js document state
+
 ## Key Architecture Principles
 
 1. **Monorepo**: All code in one repository, managed with workspaces
-2. **API-First**: Frontend only communicates through API endpoints
-3. **Mocking-Ready**: MSW enables frontend development without backend
-4. **Model-Agnostic**: AI layer abstracts provider-specific details
-5. **Real-time**: WebSockets + CRDTs for collaboration
-6. **Testable**: Unit, integration, and E2E testing at all layers
+2. **Serverless-First**: Lambda for API, Fargate for long-running tasks
+3. **API-First**: Frontend only communicates through API Gateway
+4. **Mocking-Ready**: MSW + LocalStack enable frontend development without AWS
+5. **Model-Agnostic**: AI layer abstracts provider-specific details
+6. **Real-time**: WebSockets + CRDTs for collaboration (via Fargate)
+7. **Testable**: Unit, integration, and E2E testing at all layers
+8. **Cost-Optimized**: Pay-per-use with Aurora Serverless and Lambda
 
 ## Development Workflow
 
@@ -140,23 +147,37 @@ collaboration:presence
 
 ## Common Tasks
 
-### Running Locally
+### Running Locally (with LocalStack)
 ```bash
-# Start all services
+# Start LocalStack and supporting services
 docker-compose up -d
+
+# Deploy infrastructure to LocalStack
+cd infra && cdklocal deploy --all
 
 # Run frontend
 cd apps/web && npm run dev
 
-# Run API
-cd apps/api && uvicorn main:app --reload
+# Invoke Lambda locally (for testing)
+awslocal lambda invoke --function-name ApiFunction output.json
+
+# View Lambda logs
+awslocal logs tail /aws/lambda/ApiFunction
 ```
 
 ### Database Migrations
 ```bash
+# Connect to LocalStack PostgreSQL
 cd apps/api
-alembic revision --autogenerate -m "description"
-alembic upgrade head
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/brain" \
+  alembic revision --autogenerate -m "description"
+
+# Apply migrations locally
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/brain" \
+  alembic upgrade head
+
+# Apply migrations to Aurora (production)
+DATABASE_URL=$AURORA_CONNECTION_STRING alembic upgrade head
 ```
 
 ### Running Tests
@@ -189,20 +210,33 @@ cd apps/api && pytest
 
 ### Frontend Not Connecting to API
 - Check `NEXT_PUBLIC_API_URL` in `.env.local`
-- Verify API server is running
-- Check CORS configuration
+- Verify LocalStack is running: `docker-compose ps`
+- Check API Gateway endpoint: `awslocal apigateway get-rest-apis`
+- Verify CORS configuration in CDK stack
+
+### LocalStack Issues
+- Ensure Docker is running with sufficient memory (4GB+)
+- Check LocalStack logs: `docker-compose logs localstack`
+- Verify services are healthy: `awslocal lambda list-functions`
+- For Aurora issues, ensure LocalStack Pro or use standard PostgreSQL
+
+### Lambda Cold Starts
+- Use provisioned concurrency for latency-sensitive endpoints
+- Keep Lambda packages small (use layers for dependencies)
+- Monitor cold starts in CloudWatch metrics
 
 ### AI Requests Timing Out
-- Increase timeout in AI gateway
+- Increase Lambda timeout in CDK stack (max 15 minutes)
 - Check model provider status
-- Verify API keys are valid
+- Verify API keys in Secrets Manager
 - Review rate limits
 
 ### Collaboration Sync Issues
-- Check Redis connection
-- Verify WebSocket connection
+- Check Fargate task health: `awslocal ecs describe-tasks`
+- Verify ElastiCache Redis connection
+- Check ALB target group health
 - Review Y.js CRDT state
-- Check for network issues
+- Check network/security group configuration
 
 ## Contributing
 
@@ -215,11 +249,21 @@ cd apps/api && pytest
 
 ## Resources
 
+### Frontend & Editor
 - [Next.js Docs](https://nextjs.org/docs)
-- [FastAPI Docs](https://fastapi.tiangolo.com/)
 - [TipTap Docs](https://tiptap.dev/)
 - [Y.js Docs](https://docs.yjs.dev/)
+
+### AWS & Infrastructure
+- [AWS CDK Docs](https://docs.aws.amazon.com/cdk/)
+- [AWS Lambda Docs](https://docs.aws.amazon.com/lambda/)
+- [API Gateway Docs](https://docs.aws.amazon.com/apigateway/)
+- [Aurora Serverless Docs](https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html)
+- [LocalStack Docs](https://docs.localstack.cloud/)
+
+### Backend
 - [SQLAlchemy Docs](https://docs.sqlalchemy.org/)
+- [Boto3 Docs](https://boto3.amazonaws.com/v1/documentation/api/latest/index.html)
 
 ## Questions?
 

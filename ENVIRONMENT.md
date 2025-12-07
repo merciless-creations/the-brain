@@ -4,14 +4,16 @@
 
 This document describes all environment variables needed for The Brain platform.
 
+The Brain uses AWS serverless architecture with LocalStack for local development. This guide covers configuration for both local (LocalStack) and production (AWS) environments.
+
 ## Frontend Environment (.env.local)
 
 Create `apps/web/.env.local`:
 
 ```bash
-# API Configuration
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_WS_URL=ws://localhost:8000
+# API Configuration (LocalStack)
+NEXT_PUBLIC_API_URL=http://localhost:4566/restapis/<api-id>/local/_user_request_
+NEXT_PUBLIC_WS_URL=ws://localhost:4510  # ALB WebSocket for Y.js
 
 # Feature Flags
 NEXT_PUBLIC_API_MOCKING=false
@@ -30,8 +32,8 @@ NODE_ENV=development
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
-| `NEXT_PUBLIC_API_URL` | Yes | Backend API base URL | `http://localhost:8000` |
-| `NEXT_PUBLIC_WS_URL` | Yes | WebSocket server URL | `ws://localhost:8000` |
+| `NEXT_PUBLIC_API_URL` | Yes | API Gateway endpoint URL | `http://localhost:4566/restapis/...` |
+| `NEXT_PUBLIC_WS_URL` | Yes | Y.js WebSocket URL (ALB) | `ws://localhost:4510` |
 | `NEXT_PUBLIC_API_MOCKING` | No | Enable MSW API mocking | `false` |
 | `NEXT_PUBLIC_ENABLE_COLLABORATION` | No | Enable real-time collab | `true` |
 | `NEXT_PUBLIC_ENABLE_AI_FEATURES` | No | Enable AI features | `true` |
@@ -41,7 +43,7 @@ NODE_ENV=development
 
 ## Backend Environment (.env)
 
-Create `apps/api/.env`:
+Create `apps/api/.env` (used by Lambda functions):
 
 ```bash
 # Application
@@ -50,16 +52,16 @@ APP_ENV=development
 DEBUG=true
 LOG_LEVEL=info
 
-# Server
-HOST=0.0.0.0
-PORT=8000
-ALLOWED_ORIGINS=http://localhost:3000
+# AWS Configuration (LocalStack)
+AWS_ENDPOINT_URL=http://localhost:4566
+AWS_ACCESS_KEY_ID=test
+AWS_SECRET_ACCESS_KEY=test
+AWS_DEFAULT_REGION=us-east-1
 
-# Database
-DATABASE_URL=sqlite:///./local.db
-# DATABASE_URL=postgresql://user:password@localhost:5432/thebrain
+# Database (Aurora Serverless / Local PostgreSQL)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/thebrain
 
-# Redis
+# ElastiCache Redis
 REDIS_URL=redis://localhost:6379/0
 
 # Authentication
@@ -68,7 +70,7 @@ JWT_ALGORITHM=HS256
 JWT_EXPIRATION=3600
 REFRESH_TOKEN_EXPIRATION=604800
 
-# AI Providers
+# AI Providers (stored in AWS Secrets Manager in production)
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4-turbo-preview
 OPENAI_MAX_TOKENS=4096
@@ -87,32 +89,19 @@ AI_TIMEOUT=30
 AI_MAX_RETRIES=3
 AI_CACHE_TTL=3600
 
-# Celery (Background Jobs)
-CELERY_BROKER_URL=redis://localhost:6379/1
-CELERY_RESULT_BACKEND=redis://localhost:6379/2
+# SQS Queue URLs (for background jobs)
+AI_JOBS_QUEUE_URL=http://localhost:4566/000000000000/ai-jobs
 
-# Object Storage (S3-compatible)
-S3_ENDPOINT=http://localhost:9000
-S3_ACCESS_KEY=minioadmin
-S3_SECRET_KEY=minioadmin
+# S3 Configuration
 S3_BUCKET=thebrain-uploads
 S3_REGION=us-east-1
-S3_USE_SSL=false
 
 # File Upload Limits
 MAX_UPLOAD_SIZE=10485760  # 10 MB in bytes
 ALLOWED_FILE_TYPES=.pdf,.txt,.md,.docx
 
-# Rate Limiting
-RATE_LIMIT_ENABLED=true
-RATE_LIMIT_PER_MINUTE=60
-RATE_LIMIT_PER_HOUR=1000
-AI_RATE_LIMIT_PER_HOUR=100
-
-# Security
-CORS_ENABLED=true
-CORS_ALLOW_CREDENTIALS=true
-ENCRYPTION_KEY=your-encryption-key-32-characters-long
+# CORS (configured in API Gateway, but useful for local testing)
+ALLOWED_ORIGINS=http://localhost:3000
 
 # Monitoring (Optional)
 SENTRY_DSN=
@@ -128,117 +117,175 @@ SENTRY_ENVIRONMENT=development
 | `DEBUG` | No | `true` | Enable debug mode |
 | `LOG_LEVEL` | No | `info` | Logging level (debug/info/warning/error) |
 
+#### AWS Configuration
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `AWS_ENDPOINT_URL` | Local only | - | LocalStack endpoint (not set in prod) |
+| `AWS_ACCESS_KEY_ID` | Yes | - | AWS credentials (use `test` for LocalStack) |
+| `AWS_SECRET_ACCESS_KEY` | Yes | - | AWS credentials (use `test` for LocalStack) |
+| `AWS_DEFAULT_REGION` | Yes | `us-east-1` | AWS region |
+
 #### Database
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `DATABASE_URL` | Yes | - | SQLAlchemy connection string |
+| `DATABASE_URL` | Yes | - | PostgreSQL connection string |
 
 **Examples**:
 ```bash
-# SQLite (local dev)
-DATABASE_URL=sqlite:///./local.db
+# LocalStack PostgreSQL (local dev)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/thebrain
 
-# PostgreSQL (local)
-DATABASE_URL=postgresql://postgres:password@localhost:5432/thebrain
-
-# PostgreSQL (production)
-DATABASE_URL=postgresql://user:pass@db.example.com:5432/thebrain?sslmode=require
+# Aurora Serverless (production)
+DATABASE_URL=postgresql://user:pass@thebrain-cluster.cluster-xxxxx.us-east-1.rds.amazonaws.com:5432/thebrain?sslmode=require
 ```
 
 #### AI Providers
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `OPENAI_API_KEY` | If using OpenAI | OpenAI API key |
+| `OPENAI_API_KEY` | If using OpenAI | OpenAI API key (use Secrets Manager in prod) |
 | `ANTHROPIC_API_KEY` | If using Anthropic | Anthropic API key |
 | `GOOGLE_AI_API_KEY` | If using Google | Google AI API key |
 | `DEFAULT_AI_PROVIDER` | No | Which provider to use by default |
 
-#### Object Storage
+#### SQS (Background Jobs)
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `S3_ENDPOINT` | Yes | S3-compatible endpoint URL |
-| `S3_ACCESS_KEY` | Yes | Access key |
-| `S3_SECRET_KEY` | Yes | Secret key |
-| `S3_BUCKET` | Yes | Bucket name |
+| `AI_JOBS_QUEUE_URL` | Yes | SQS queue URL for AI background jobs |
 
 **Examples**:
 ```bash
-# MinIO (local)
-S3_ENDPOINT=http://localhost:9000
-S3_ACCESS_KEY=minioadmin
-S3_SECRET_KEY=minioadmin
+# LocalStack
+AI_JOBS_QUEUE_URL=http://localhost:4566/000000000000/ai-jobs
 
-# AWS S3 (production)
-S3_ENDPOINT=https://s3.us-east-1.amazonaws.com
-S3_ACCESS_KEY=AKIAIOSFODNN7EXAMPLE
-S3_SECRET_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY
-
-# Cloudflare R2
-S3_ENDPOINT=https://<account-id>.r2.cloudflarestorage.com
+# AWS Production
+AI_JOBS_QUEUE_URL=https://sqs.us-east-1.amazonaws.com/123456789/ai-jobs
 ```
+
+#### S3 Storage
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `S3_BUCKET` | Yes | S3 bucket name |
+| `S3_REGION` | Yes | S3 bucket region |
+
+**Note**: In production, use IAM roles instead of access keys. LocalStack uses `AWS_ENDPOINT_URL` to redirect S3 calls.
 
 ---
 
-## Docker Compose Environment
+## Docker Compose Environment (LocalStack)
 
 Create `.env` in project root:
 
 ```bash
-# PostgreSQL
+# LocalStack Configuration
+LOCALSTACK_AUTH_TOKEN=          # Optional: for LocalStack Pro features
+LOCALSTACK_DEBUG=0
+LOCALSTACK_SERVICES=lambda,apigateway,s3,sqs,secretsmanager,ecs,ecr,elasticache,rds
+
+# PostgreSQL (for local database, Aurora emulation requires LocalStack Pro)
 POSTGRES_USER=postgres
 POSTGRES_PASSWORD=postgres
 POSTGRES_DB=thebrain
 
-# Redis
+# Redis (for Y.js state and caching)
 REDIS_PASSWORD=
 
-# MinIO
-MINIO_ROOT_USER=minioadmin
-MINIO_ROOT_PASSWORD=minioadmin
+# AWS Credentials (for LocalStack)
+AWS_ACCESS_KEY_ID=test
+AWS_SECRET_ACCESS_KEY=test
+AWS_DEFAULT_REGION=us-east-1
+```
+
+### docker-compose.yml services
+
+The following services should be defined in `docker-compose.yml`:
+
+```yaml
+services:
+  localstack:
+    image: localstack/localstack:latest
+    ports:
+      - "4566:4566"           # LocalStack main endpoint
+      - "4510-4559:4510-4559" # External service ports (ALB, etc.)
+    environment:
+      - SERVICES=${LOCALSTACK_SERVICES}
+      - DEBUG=${LOCALSTACK_DEBUG}
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN}
+    volumes:
+      - "./infra/localstack:/etc/localstack/init/ready.d"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  postgres:
+    image: postgres:15
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+
+volumes:
+  postgres_data:
 ```
 
 ---
 
 ## Environment by Deployment Type
 
-### Local Development
+### Local Development (LocalStack)
 ```bash
 # Frontend
-NEXT_PUBLIC_API_URL=http://localhost:8000
+NEXT_PUBLIC_API_URL=http://localhost:4566/restapis/<api-id>/local/_user_request_
+NEXT_PUBLIC_WS_URL=ws://localhost:4510
 NEXT_PUBLIC_API_MOCKING=false
 
-# Backend
-DATABASE_URL=sqlite:///./local.db
+# Backend (Lambda environment variables)
+AWS_ENDPOINT_URL=http://localhost:4566
+AWS_ACCESS_KEY_ID=test
+AWS_SECRET_ACCESS_KEY=test
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/thebrain
 REDIS_URL=redis://localhost:6379/0
 DEBUG=true
 ```
 
-### Staging
+### Staging (AWS)
 ```bash
-# Frontend
+# Frontend (deployed to Vercel/Amplify)
 NEXT_PUBLIC_API_URL=https://api-staging.thebrain.io
+NEXT_PUBLIC_WS_URL=wss://collab-staging.thebrain.io
 NEXT_PUBLIC_API_MOCKING=false
 
-# Backend
-DATABASE_URL=postgresql://user:pass@staging-db.example.com:5432/thebrain
-REDIS_URL=redis://staging-redis.example.com:6379/0
+# Backend (Lambda environment via CDK)
+# AWS_ENDPOINT_URL not set (uses real AWS)
+DATABASE_URL=postgresql://user:pass@staging-cluster.cluster-xxx.rds.amazonaws.com:5432/thebrain
+REDIS_URL=redis://staging-redis.xxx.cache.amazonaws.com:6379/0
 DEBUG=false
 LOG_LEVEL=info
 ```
 
-### Production
+### Production (AWS)
 ```bash
 # Frontend
 NEXT_PUBLIC_API_URL=https://api.thebrain.io
+NEXT_PUBLIC_WS_URL=wss://collab.thebrain.io
 NEXT_PUBLIC_API_MOCKING=false
 
-# Backend
-DATABASE_URL=postgresql://user:pass@prod-db.example.com:5432/thebrain?sslmode=require
-REDIS_URL=rediss://prod-redis.example.com:6379/0?ssl_cert_reqs=required
+# Backend (Lambda environment via CDK)
+DATABASE_URL=postgresql://user:pass@prod-cluster.cluster-xxx.rds.amazonaws.com:5432/thebrain?sslmode=require
+REDIS_URL=rediss://prod-redis.xxx.cache.amazonaws.com:6379/0
 DEBUG=false
 LOG_LEVEL=warning
 SENTRY_DSN=https://...
 ```
+
+**Note**: In production, sensitive values (API keys, database credentials) should be stored in AWS Secrets Manager and retrieved at runtime.
 
 ---
 
@@ -312,8 +359,9 @@ Backend will validate on startup:
 
 ### apps/web/.env.example
 ```bash
-NEXT_PUBLIC_API_URL=http://localhost:8000
-NEXT_PUBLIC_WS_URL=ws://localhost:8000
+# After running `cdklocal deploy`, get the API Gateway URL from output
+NEXT_PUBLIC_API_URL=http://localhost:4566/restapis/<api-id>/local/_user_request_
+NEXT_PUBLIC_WS_URL=ws://localhost:4510
 NEXT_PUBLIC_API_MOCKING=false
 NODE_ENV=development
 ```
@@ -322,14 +370,31 @@ NODE_ENV=development
 ```bash
 APP_ENV=development
 DEBUG=true
-DATABASE_URL=sqlite:///./local.db
+
+# AWS/LocalStack
+AWS_ENDPOINT_URL=http://localhost:4566
+AWS_ACCESS_KEY_ID=test
+AWS_SECRET_ACCESS_KEY=test
+AWS_DEFAULT_REGION=us-east-1
+
+# Database
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/thebrain
+
+# Redis
 REDIS_URL=redis://localhost:6379/0
+
+# Auth
 JWT_SECRET=change-this-to-a-secure-random-string
+
+# AI (store in Secrets Manager for production)
 OPENAI_API_KEY=sk-your-key-here
-S3_ENDPOINT=http://localhost:9000
-S3_ACCESS_KEY=minioadmin
-S3_SECRET_KEY=minioadmin
+
+# SQS
+AI_JOBS_QUEUE_URL=http://localhost:4566/000000000000/ai-jobs
+
+# S3
 S3_BUCKET=thebrain-uploads
+S3_REGION=us-east-1
 ```
 
 ---
@@ -349,6 +414,43 @@ cat apps/api/.env | grep JWT_SECRET
 # ❌ JWT_SECRET = value
 ```
 
+### "LocalStack not starting"
+```bash
+# Check LocalStack container status
+docker-compose ps localstack
+
+# View LocalStack logs
+docker-compose logs localstack
+
+# Verify LocalStack is healthy
+curl http://localhost:4566/_localstack/health
+
+# Check available services
+awslocal --endpoint-url=http://localhost:4566 sts get-caller-identity
+```
+
+### "Lambda function not found"
+```bash
+# List deployed Lambda functions
+awslocal lambda list-functions
+
+# Redeploy infrastructure
+cd infra && cdklocal deploy --all
+
+# Check Lambda logs
+awslocal logs describe-log-groups
+awslocal logs tail /aws/lambda/<function-name>
+```
+
+### "API Gateway endpoint not working"
+```bash
+# List API Gateway APIs
+awslocal apigateway get-rest-apis
+
+# Get the API ID and test
+curl http://localhost:4566/restapis/<api-id>/local/_user_request_/health
+```
+
 ### "Database connection failed"
 ```bash
 # Test PostgreSQL connection
@@ -356,6 +458,9 @@ psql -U postgres -h localhost -d thebrain
 
 # Check DATABASE_URL format
 # postgresql://user:password@host:port/database
+
+# Check if PostgreSQL container is running
+docker-compose ps postgres
 ```
 
 ### "Redis connection failed"
@@ -364,13 +469,37 @@ psql -U postgres -h localhost -d thebrain
 redis-cli ping
 
 # Should return: PONG
+
+# Check if Redis container is running
+docker-compose ps redis
 ```
 
 ### "S3 upload failed"
 ```bash
-# Test MinIO connection
-mc alias set local http://localhost:9000 minioadmin minioadmin
-mc ls local
+# Test LocalStack S3
+awslocal s3 ls
+
+# Create bucket if missing
+awslocal s3 mb s3://thebrain-uploads
+
+# Test upload
+echo "test" | awslocal s3 cp - s3://thebrain-uploads/test.txt
+```
+
+### "SQS messages not processing"
+```bash
+# List queues
+awslocal sqs list-queues
+
+# Check queue attributes
+awslocal sqs get-queue-attributes \
+  --queue-url http://localhost:4566/000000000000/ai-jobs \
+  --attribute-names All
+
+# View messages (without consuming)
+awslocal sqs receive-message \
+  --queue-url http://localhost:4566/000000000000/ai-jobs \
+  --visibility-timeout 0
 ```
 
 ---
@@ -382,31 +511,49 @@ Automatically loads `.env.local` in development.
 
 Variables prefixed with `NEXT_PUBLIC_` are available in browser.
 
-### FastAPI
-```python
-from pydantic_settings import BaseSettings
+### Lambda Functions
+Environment variables are set via AWS CDK:
 
-class Settings(BaseSettings):
-    database_url: str
-    jwt_secret: str
-    
-    class Config:
-        env_file = ".env"
-
-settings = Settings()
+```typescript
+// infra/lib/api-stack.ts
+const apiFunction = new lambda.Function(this, 'ApiFunction', {
+  runtime: lambda.Runtime.PYTHON_3_11,
+  handler: 'handler.main',
+  code: lambda.Code.fromAsset('../apps/api'),
+  environment: {
+    DATABASE_URL: databaseSecret.secretValueFromJson('url').toString(),
+    REDIS_URL: redisCluster.attrRedisEndpointAddress,
+    JWT_SECRET: jwtSecret.secretValue.toString(),
+  },
+});
 ```
 
-### Docker Compose
+For local development, Lambda functions read from `.env` via the AWS SDK's endpoint override.
+
+### AWS CDK (LocalStack)
+Use `cdklocal` wrapper for LocalStack deployment:
+
+```bash
+# Install cdklocal
+npm install -g aws-cdk-local aws-cdk
+
+# Deploy to LocalStack
+cd infra && cdklocal deploy --all
+
+# Deploy to AWS (production)
+cd infra && cdk deploy --all --profile production
+```
+
+### Docker Compose (LocalStack)
 ```yaml
 services:
-  api:
-    env_file:
-      - .env
+  localstack:
     environment:
-      - DATABASE_URL=${DATABASE_URL}
+      - SERVICES=lambda,apigateway,s3,sqs
+      - DEBUG=0
 ```
 
 ---
 
 **Last Updated**: 2025-12-07
-**Version**: 1.0
+**Version**: 2.0 (AWS Serverless)

@@ -27,16 +27,27 @@ gh issue view 6
 
 #### Start Development Environment
 ```bash
-# Terminal 1: Frontend
+# Terminal 1: Start LocalStack and supporting services
+docker-compose up -d
+
+# Terminal 2: Deploy infrastructure to LocalStack
+cd infra
+npm install
+cdklocal deploy --all
+
+# Terminal 3: Start Frontend
 cd apps/web
 npm run dev
 
-# Terminal 2: Backend
-cd apps/api
-uvicorn main:app --reload
+# Note: API is served by Lambda functions in LocalStack, no separate backend process needed
+```
 
-# Terminal 3: Services (if needed)
-docker-compose up redis postgres
+#### Get API Gateway URL
+After CDK deployment, get the API Gateway URL:
+```bash
+awslocal apigateway get-rest-apis
+# Copy the API ID and construct URL:
+# http://localhost:4566/restapis/<api-id>/local/_user_request_/api/v1/...
 ```
 
 #### Write Code
@@ -51,12 +62,21 @@ docker-compose up redis postgres
 cd apps/web
 npm test
 
-# Backend tests
+# Backend tests (Lambda functions)
 cd apps/api
 pytest
 
 # Run specific test
 pytest tests/test_chapters.py::test_create_chapter
+
+# Integration tests against LocalStack
+pytest tests/integration/ --localstack
+```
+
+#### Redeploy After Lambda Code Changes
+```bash
+# Hot reload is not automatic - redeploy after Lambda changes
+cd infra && cdklocal deploy ApiStack --hotswap
 ```
 
 ### 3. Code Quality Checks
@@ -209,8 +229,12 @@ git branch -d feature/6-chapter-generator
 # Check versions
 node --version  # 18+
 python --version  # 3.11+
-docker --version
+docker --version  # 20+
 git --version
+
+# Install AWS CLI and LocalStack tools
+pip install awscli-local localstack
+npm install -g aws-cdk-local aws-cdk
 ```
 
 ### Clone & Install
@@ -226,10 +250,10 @@ cd the-brain
 cd apps/web
 npm install
 cp .env.example .env.local
-# Edit .env.local with your settings
+# Edit .env.local with your settings (update API Gateway URL after CDK deploy)
 ```
 
-#### 3. Install Backend
+#### 3. Install Backend (Lambda Functions)
 ```bash
 cd apps/api
 python -m venv venv
@@ -239,15 +263,41 @@ cp .env.example .env
 # Edit .env with your settings
 ```
 
-#### 4. Setup Database
+#### 4. Install Infrastructure (CDK)
 ```bash
-cd apps/api
-alembic upgrade head
+cd infra
+npm install
 ```
 
-#### 5. Start Services
+#### 5. Start LocalStack
 ```bash
+# From project root
 docker-compose up -d
+
+# Wait for LocalStack to be healthy
+curl http://localhost:4566/_localstack/health
+```
+
+#### 6. Deploy Infrastructure to LocalStack
+```bash
+cd infra
+cdklocal bootstrap
+cdklocal deploy --all
+
+# Note the API Gateway URL from the output
+```
+
+#### 7. Setup Database
+```bash
+# Run migrations against local PostgreSQL
+cd apps/api
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/thebrain" alembic upgrade head
+```
+
+#### 8. Update Frontend Environment
+```bash
+# Update .env.local with the API Gateway URL from step 6
+# NEXT_PUBLIC_API_URL=http://localhost:4566/restapis/<api-id>/local/_user_request_
 ```
 
 ---
@@ -341,36 +391,64 @@ test('create chapter and generate draft', async ({ page }) => {
 }
 ```
 
-### Backend Debugging
+### Backend Debugging (Lambda)
 
-#### FastAPI Debug Mode
+#### View Lambda Logs
 ```bash
-# Run with auto-reload and debug logs
-uvicorn main:app --reload --log-level debug
+# List available log groups
+awslocal logs describe-log-groups
+
+# Tail logs for a specific function
+awslocal logs tail /aws/lambda/ApiFunction --follow
+
+# View recent logs
+awslocal logs filter-log-events --log-group-name /aws/lambda/ApiFunction
 ```
 
-#### VS Code
+#### Invoke Lambda Directly
+```bash
+# Test Lambda function directly
+awslocal lambda invoke \
+  --function-name ApiFunction \
+  --payload '{"httpMethod": "GET", "path": "/api/v1/health"}' \
+  output.json
+
+cat output.json
+```
+
+#### VS Code (with LocalStack)
 ```json
 // .vscode/launch.json
 {
   "type": "python",
   "request": "launch",
-  "name": "FastAPI",
-  "module": "uvicorn",
-  "args": ["main:app", "--reload"],
-  "jinja": true
+  "name": "Debug Lambda Handler",
+  "program": "${workspaceFolder}/apps/api/handlers/projects.py",
+  "env": {
+    "AWS_ENDPOINT_URL": "http://localhost:4566",
+    "DATABASE_URL": "postgresql://postgres:postgres@localhost:5432/thebrain"
+  }
 }
 ```
 
 #### Print Debugging
 ```python
 import logging
-logger = logging.getLogger(__name__)
+logger = logging.getLogger()
+logger.setLevel(logging.DEBUG)
 
-logger.debug(f"User ID: {user_id}")
-logger.info(f"Processing draft for chapter {chapter_id}")
-logger.warning(f"AI request took {duration}s")
-logger.error(f"Failed to generate draft: {error}")
+def handler(event, context):
+    logger.debug(f"Event: {event}")
+    logger.info(f"Processing request: {event['path']}")
+    logger.warning(f"Slow operation detected")
+    logger.error(f"Error: {error}")
+```
+
+#### Local Unit Testing (without LocalStack)
+```bash
+# Run tests with mocked AWS services
+cd apps/api
+pytest --tb=short -v
 ```
 
 ### Database Debugging
@@ -446,21 +524,72 @@ python -m pytest -v
 python -m pytest --cov
 ```
 
-### Docker
+### Docker / LocalStack
 ```bash
-docker-compose up -d
-docker-compose down
-docker-compose logs -f api
-docker-compose restart redis
-docker ps
+docker-compose up -d              # Start LocalStack + services
+docker-compose down               # Stop all services
+docker-compose logs -f localstack # View LocalStack logs
+docker-compose restart redis      # Restart Redis
+docker ps                         # List running containers
 docker exec -it thebrain-postgres psql -U postgres
+```
+
+### AWS CDK (LocalStack)
+```bash
+cd infra
+cdklocal bootstrap               # First time setup
+cdklocal deploy --all            # Deploy all stacks
+cdklocal deploy ApiStack         # Deploy specific stack
+cdklocal deploy --hotswap        # Fast deploy (Lambda only)
+cdklocal destroy --all           # Tear down
+cdklocal diff                    # Show changes
+cdklocal synth                   # Generate CloudFormation
+```
+
+### AWS CDK (Production)
+```bash
+cd infra
+cdk deploy --all --profile prod  # Deploy to AWS
+cdk diff --profile prod          # Show changes
+```
+
+### LocalStack AWS CLI (awslocal)
+```bash
+# Lambda
+awslocal lambda list-functions
+awslocal lambda invoke --function-name ApiFunction output.json
+awslocal logs tail /aws/lambda/ApiFunction
+
+# API Gateway
+awslocal apigateway get-rest-apis
+awslocal apigateway get-resources --rest-api-id <id>
+
+# S3
+awslocal s3 ls
+awslocal s3 mb s3://thebrain-uploads
+awslocal s3 cp file.txt s3://thebrain-uploads/
+
+# SQS
+awslocal sqs list-queues
+awslocal sqs receive-message --queue-url <url>
+
+# Secrets Manager
+awslocal secretsmanager list-secrets
+awslocal secretsmanager get-secret-value --secret-id <id>
 ```
 
 ### Database
 ```bash
-alembic revision --autogenerate -m "add chapters table"
-alembic upgrade head
-alembic downgrade -1
+# Run migrations (local)
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/thebrain" alembic upgrade head
+
+# Create migration
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/thebrain" alembic revision --autogenerate -m "add chapters table"
+
+# Rollback
+DATABASE_URL="postgresql://postgres:postgres@localhost:5432/thebrain" alembic downgrade -1
+
+# History
 alembic history
 ```
 
@@ -475,6 +604,9 @@ cd apps/web && npm install
 
 # Backend
 cd apps/api && pip install -r requirements.txt
+
+# CDK
+cd infra && npm install
 ```
 
 ### "Port already in use"
@@ -485,30 +617,89 @@ netstat -ano | findstr :3000  # Windows
 
 # Kill process
 kill -9 <PID>
+
+# Common ports: 3000 (frontend), 4566 (LocalStack), 5432 (Postgres), 6379 (Redis)
+```
+
+### "LocalStack not starting"
+```bash
+# Check if LocalStack is running
+docker-compose ps
+
+# View logs
+docker-compose logs localstack
+
+# Check health
+curl http://localhost:4566/_localstack/health
+
+# Restart LocalStack
+docker-compose restart localstack
+```
+
+### "Lambda not updating"
+```bash
+# CDK hotswap for faster updates
+cd infra && cdklocal deploy --hotswap
+
+# Full redeploy if hotswap doesn't work
+cd infra && cdklocal deploy --all
+
+# Check Lambda was updated
+awslocal lambda get-function --function-name ApiFunction
+```
+
+### "API Gateway 403/404"
+```bash
+# Get the correct API Gateway URL
+awslocal apigateway get-rest-apis
+
+# URL format: http://localhost:4566/restapis/<api-id>/local/_user_request_/api/v1/...
+
+# Test health endpoint
+curl http://localhost:4566/restapis/<api-id>/local/_user_request_/api/v1/health
 ```
 
 ### "Database connection failed"
 ```bash
 # Check if Postgres is running
-docker ps
+docker ps | grep postgres
 
 # Restart Postgres
 docker-compose restart postgres
 
 # Check connection
-psql -U postgres -d thebrain
+psql -h localhost -U postgres -d thebrain
 ```
 
 ### "Tests failing"
 ```bash
-# Clear cache and retry
+# Frontend: Clear cache and retry
 npm test -- --clearCache
+
+# Backend: Run with verbose output
+pytest -v --tb=long
 
 # Run single test
 npm test -- ChapterOutline.test.tsx
+pytest tests/test_chapters.py::test_create_chapter -v
+```
+
+### "CDK bootstrap failed"
+```bash
+# For LocalStack, make sure it's running first
+docker-compose up -d
+
+# Then bootstrap
+cdklocal bootstrap
+
+# If still failing, try destroying and redeploying
+cdklocal destroy --all
+cdklocal bootstrap
+cdklocal deploy --all
 ```
 
 ---
 
 **Last Updated**: 2025-12-07
+**Version**: 2.0 (AWS Serverless)
 **Maintained By**: The Brain Development Team
