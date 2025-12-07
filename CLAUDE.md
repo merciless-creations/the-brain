@@ -10,11 +10,12 @@
 /the-brain
 ├── apps/
 │   ├── web/              # Next.js Frontend
-│   └── api/              # FastAPI Backend
+│   └── api/              # Lambda Functions (Python)
 ├── packages/             # Shared libraries
+├── infra/                # AWS CDK Infrastructure
 ├── docs/                 # Documentation
 ├── .github/              # GitHub workflows
-└── docker-compose.yml    # Service orchestration
+└── docker-compose.yml    # LocalStack orchestration
 ```
 
 ## Tech Stack
@@ -27,14 +28,17 @@
 - **State**: React Query + Zustand
 - **API Client**: Custom fetch wrapper with MSW mocking
 
-### Backend
-- **Framework**: FastAPI (Python 3.11+)
+### Backend (AWS Serverless)
+- **API Layer**: AWS API Gateway (REST + WebSocket)
+- **Compute**: AWS Lambda (Python 3.11+)
 - **ORM**: SQLAlchemy 2.0
-- **Database**: PostgreSQL (SQLite for local dev)
-- **Cache**: Redis
-- **Queue**: Celery with Redis broker
-- **Auth**: JWT with refresh tokens
-- **Storage**: S3-compatible (MinIO for local)
+- **Database**: Aurora Serverless v2 (PostgreSQL-compatible)
+- **Cache**: ElastiCache Redis
+- **Background Jobs**: AWS Fargate (triggered via SQS)
+- **Auth**: JWT with refresh tokens (via Lambda Authorizer)
+- **Storage**: S3
+- **Infrastructure**: AWS CDK (TypeScript)
+- **Local Dev**: LocalStack (AWS emulation)
 
 ### AI Layer
 - **Abstraction**: Custom gateway service
