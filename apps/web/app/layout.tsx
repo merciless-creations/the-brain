@@ -16,8 +16,8 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en">
-      <body className={`${inter.variable} antialiased`}>
+    <html lang="en" className="dark">
+      <body className={`${inter.variable} antialiased bg-bg-app text-text-primary`}>
         <MSWProvider>{children}</MSWProvider>
       </body>
     </html>
