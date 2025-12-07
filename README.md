@@ -720,3 +720,17 @@ User        Frontend      API Gateway      Lambda           S3            SQS   
 ```
 
 
+
+
+---
+
+## 📚 Documentation
+
+- **[README-MONOREPO.md](./README-MONOREPO.md)** - Monorepo structure and workspace management
+- **[CLAUDE.md](./CLAUDE.md)** - Claude AI assistant guide for contributors
+- **[docs/](./docs/)** - Detailed project documentation
+  - API conventions and getting started
+  - Design system and components
+  - Environment setup
+  - Product roadmap and business strategy
+  - Technology stack and resources
