@@ -63,13 +63,30 @@
 
 ## Development Workflow
 
+### 🔒 Branch Protection Rules
+
+**IMPORTANT**: The `main` branch is protected. You **MUST** work from feature branches.
+
 ### Starting a New Feature
 
-1. **Read the Issue**: Understand requirements and acceptance criteria
-2. **Check Dependencies**: Review related issues and blockers
-3. **Plan First**: Always create a plan before coding
-4. **Small PRs**: Break large features into reviewable chunks
-5. **Test Coverage**: Write tests alongside implementation
+1. **Issue Required**: All work must be associated with a GitHub issue
+2. **Create Feature Branch**: 
+   ```bash
+   git checkout -b feature/issue-{number}-short-description
+   # Example: git checkout -b feature/issue-18-tiptap-editor
+   ```
+3. **Read the Issue**: Understand requirements and acceptance criteria
+4. **Check Dependencies**: Review related issues and blockers
+5. **Plan First**: Always create a plan before coding
+6. **Small PRs**: Break large features into reviewable chunks
+7. **Test Coverage**: Write tests alongside implementation
+8. **Create Pull Request**:
+   ```bash
+   git push origin feature/issue-{number}-short-description
+   gh pr create --title "feat: {description}" --body "Closes #{issue-number}"
+   ```
+9. **Get Approval**: Minimum 1 approving review required
+10. **Merge**: Only merge after approval (no direct commits to main)
 
 ### Testing Strategy
 
@@ -188,6 +205,22 @@ cd apps/web && npm test
 # Backend
 cd apps/api && pytest
 ```
+
+## Git Commit Conventions
+
+Follow [Conventional Commits](https://www.conventionalcommits.org/):
+
+```
+feat: Add new feature (e.g., feat: add TipTap editor)
+fix: Bug fix (e.g., fix: resolve MSW service worker error)
+docs: Documentation changes (e.g., docs: update API conventions)
+style: Code style changes (e.g., style: format with Prettier)
+refactor: Code refactoring (e.g., refactor: extract API client)
+test: Test additions/changes (e.g., test: add project API tests)
+chore: Build/tooling changes (e.g., chore: update dependencies)
+```
+
+**Always reference the issue**: Include `Closes #{issue-number}` in PR body.
 
 ## Security Considerations
 
