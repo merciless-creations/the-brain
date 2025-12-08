@@ -1,4 +1,5 @@
 import { http, HttpResponse } from 'msw'
+import { projectHandlers } from './handlers/projects'
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
@@ -8,86 +9,8 @@ export const handlers = [
     return HttpResponse.json({ status: 'ok', message: 'API is running' })
   }),
 
-  // Get all projects
-  http.get(`${API_URL}/api/v1/projects`, () => {
-    return HttpResponse.json({
-      data: [
-        {
-          id: '1',
-          type: 'project',
-          attributes: {
-            title: 'Climate Change and Biodiversity',
-            created_at: '2025-12-01T10:00:00Z',
-            updated_at: '2025-12-07T15:30:00Z',
-            chapter_count: 5,
-            word_count: 12450,
-            status: 'draft',
-          },
-        },
-        {
-          id: '2',
-          type: 'project',
-          attributes: {
-            title: 'The Future of AI in Healthcare',
-            created_at: '2025-11-15T09:00:00Z',
-            updated_at: '2025-12-05T14:20:00Z',
-            chapter_count: 8,
-            word_count: 18920,
-            status: 'needs-edit',
-          },
-        },
-      ],
-      meta: {
-        pagination: {
-          page: 1,
-          limit: 20,
-          total: 2,
-          pages: 1,
-        },
-      },
-    })
-  }),
-
-  // Get single project
-  http.get(`${API_URL}/api/v1/projects/:id`, ({ params }) => {
-    const { id } = params
-    return HttpResponse.json({
-      data: {
-        id,
-        type: 'project',
-        attributes: {
-          title: 'Climate Change and Biodiversity',
-          created_at: '2025-12-01T10:00:00Z',
-          updated_at: '2025-12-07T15:30:00Z',
-          chapter_count: 5,
-          word_count: 12450,
-          status: 'draft',
-        },
-      },
-    })
-  }),
-
-  // Create project
-  http.post(`${API_URL}/api/v1/projects`, async ({ request }) => {
-    const body = await request.json()
-    return HttpResponse.json(
-      {
-        data: {
-          id: '3',
-          type: 'project',
-          attributes: {
-            ...body,
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            chapter_count: 0,
-            word_count: 0,
-            status: 'draft',
-          },
-        },
-      },
-      { status: 201 }
-    )
-  }),
+  // Project handlers
+  ...projectHandlers,
 
   // Get chapters for a project
   http.get(`${API_URL}/api/v1/projects/:id/chapters`, ({ params }) => {

@@ -5,6 +5,33 @@
 /* Modern Design System v2.0 - CSS Variables */
 
 :root {
+  color-scheme: dark;
+  
+  /* Dark Mode - Backgrounds (Softer True Black) - DEFAULT */
+  --bg-app: #000000;
+  --bg-primary: #0A0A0A;
+  --bg-secondary: #141414;
+  --bg-tertiary: #1C1C1C;
+  --bg-elevated: #222222;
+  --bg-input: #1A1A1A;
+  --bg-code: #0F0F0F;
+  
+  /* Dark Mode - Borders (Softer) - DEFAULT */
+  --border-subtle: rgba(255, 255, 255, 0.04);
+  --border-default: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.12);
+  --border-accent: rgba(99, 102, 241, 0.4);
+  
+  /* Dark Mode - Text (Softer) - DEFAULT */
+  --text-primary: #E5E5E5;
+  --text-secondary: #9CA3AF;
+  --text-tertiary: #6B7280;
+  --text-disabled: #404040;
+  --text-link: #818CF8;
+  --text-link-hover: #A5B4FC;
+}
+
+.light {
   color-scheme: light;
   
   /* Light Mode - Backgrounds */
@@ -129,7 +156,7 @@
     @apply text-text-primary placeholder:text-text-tertiary;
     @apply transition-all duration-200 ease-smooth;
     @apply hover:border-border-strong;
-    @apply focus:border-accent-blue focus:outline-none focus:ring-3 focus:ring-accent-blue/10;
+    @apply focus:border-accent-blue focus:outline-none focus:ring-4 focus:ring-accent-blue/10;
   }
   
   /* Link styles */
