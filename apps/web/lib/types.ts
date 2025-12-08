@@ -1,14 +1,32 @@
+// Project types
+export type ProjectStatus = 'draft' | 'active' | 'archived';
+export type ProjectType = 'book' | 'article' | 'whitepaper' | 'guide' | 'other';
+
 export interface Project {
   id: string
-  type: 'project'
-  attributes: {
-    title: string
-    created_at: string
-    updated_at: string
-    chapter_count: number
-    word_count: number
-    status: 'draft' | 'needs-research' | 'needs-edit' | 'final'
-  }
+  title: string
+  description: string
+  type: ProjectType
+  status: ProjectStatus
+  created_at: string
+  updated_at: string
+  chapter_count: number
+  word_count: number
+  cover_color: string // For book spine visualization
+  last_edited_by?: string
+}
+
+export interface CreateProjectDto {
+  title: string
+  description: string
+  type: ProjectType
+}
+
+export interface UpdateProjectDto {
+  title?: string
+  description?: string
+  type?: ProjectType
+  status?: ProjectStatus
 }
 
 export interface Chapter {
